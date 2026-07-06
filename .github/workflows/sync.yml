@@ -1,0 +1,67 @@
+name: Lead Source Sync
+
+on:
+  schedule:
+    # 10:00 UTC ~= 6:00 AM US Eastern. GitHub Actions cron is UTC-only and does
+    # not observe DST, so this drifts to ~5:00 AM ET during EST (Nov-Mar).
+    # Close enough for a daily batch job; adjust here if exact timing matters.
+    - cron: '0 10 * * *'
+  workflow_dispatch:
+    inputs:
+      live:
+        description: 'Run live (actually save changes)? Unchecked = dry run.'
+        type: boolean
+        default: true
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Authenticate (log in once, save session)
+        env:
+          LOGIN_URL: ${{ secrets.LOGIN_URL }}
+          SAP_USER: ${{ secrets.SAP_USER }}
+          SAP_PASS: ${{ secrets.SAP_PASS }}
+        run: npm run auth
+
+      - name: Run sync
+        env:
+          BASE_URL: ${{ secrets.BASE_URL }}
+          LOGIN_URL: ${{ secrets.LOGIN_URL }}
+          SAP_USER: ${{ secrets.SAP_USER }}
+          SAP_PASS: ${{ secrets.SAP_PASS }}
+          WHATCONVERTS_API_TOKEN: ${{ secrets.WHATCONVERTS_API_TOKEN }}
+          WHATCONVERTS_API_SECRET: ${{ secrets.WHATCONVERTS_API_SECRET }}
+          WHATCONVERTS_PROFILE_ID: ${{ secrets.WHATCONVERTS_PROFILE_ID }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          SMTP_TO: ${{ secrets.SMTP_TO }}
+          # workflow_dispatch lets a human force a dry run; the schedule always runs live.
+          # Calling playwright directly (not `npm run sync:live`) because that npm
+          # script hardcodes LIVE_RUN=true via cross-env, which would ignore this.
+          LIVE_RUN: ${{ github.event_name == 'schedule' || inputs.live == true }}
+        run: npx playwright test tests/sync.spec.ts --retries=0
+
+      - name: Upload debug artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 14

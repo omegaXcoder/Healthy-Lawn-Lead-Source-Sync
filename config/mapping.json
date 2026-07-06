@@ -1,0 +1,39 @@
+{
+  "_comment": "What Converts source/medium -> ServiceAssistant 'Source' dropdown label. Matched case-insensitively against lead_source/lead_medium. Confirmed live 2026-07-05 against account 809961 (Healthy Lawn NJ). crmSource must exactly match an option in the live dropdown (verified list in _dropdown_options_confirmed_live).",
+  "_dropdown_options_confirmed_live": [
+    "AI - Chat GPT",
+    "BNG - Bing Organic",
+    "COM - Custom Commercial",
+    "DDG - Duck Duck Go",
+    "EC - Existing Customer",
+    "GA - Google CPC",
+    "GMB - GMB Organic",
+    "INH - In-house",
+    "LSA - LSA CPC",
+    "ORG - Google Organic",
+    "PC - Previous Cancellation",
+    "PLD - Previous Lead",
+    "POS - Saw Posting Sign",
+    "RES - Custom Residential",
+    "RF - Referral",
+    "ST - Saw Truck",
+    "WEB - Direct Visit",
+    "Facebook Ads - CPC"
+  ],
+  "rules": [
+    { "source": "gmb", "medium": ["organic", "none", ""], "crmSource": "GMB - GMB Organic" },
+    { "source": "google", "medium": ["organic"], "crmSource": "ORG - Google Organic" },
+    { "source": "(direct)", "medium": ["(none)", "none", ""], "skip": true, "note": "Direct Visit — leave alone per client instructions" },
+    { "source": "google", "medium": ["cpc"], "crmSource": "GA - Google CPC" },
+    { "source": "lsa", "medium": ["cpc"], "crmSource": "LSA - LSA CPC" },
+    { "source": "yahoo", "medium": ["organic"], "crmSource": "ORG - Google Organic" },
+    { "source": "bing", "medium": ["cpc"], "crmSource": "BNG - Bing Organic", "note": "TEMPORARY: client's table says 'Bing'/CPC -> \"Bing\" but no plain Bing-CPC option exists in the live CRM dropdown. Client decided (2026-07-06) to map this to 'BNG - Bing Organic' for now until/unless a dedicated Bing CPC option is added." },
+    { "source": "bing", "medium": ["organic"], "crmSource": "BNG - Bing Organic" },
+    { "source": "duckduckgo", "medium": ["referral", "organic", "none", ""], "crmSource": "DDG - Duck Duck Go" },
+    { "sourcePattern": "\\.com$", "medium": ["referral"], "crmSource": "ORG - Google Organic", "note": "catch-all: any referral source ending in .com" },
+    { "source": "facebook", "medium": ["*"], "crmSource": "Facebook Ads - CPC" },
+    { "source": "instagram", "medium": ["*"], "crmSource": "Facebook Ads - CPC" },
+    { "source": "chatgpt", "medium": ["*"], "crmSource": "AI - Chat GPT" },
+    { "source": "lawn sign", "medium": ["*"], "crmSource": "POS - Saw Posting Sign" }
+  ]
+}
