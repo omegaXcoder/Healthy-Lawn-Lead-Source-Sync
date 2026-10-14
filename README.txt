@@ -66,6 +66,11 @@ filter rule. Every lead is logged as exactly one of:
   ALREADY_CORRECT  CRM Source already matches the mapped value. No change made.
   WOULD_CHANGE     Dry run only: this is what a live run would change.
   CHANGED          Live run only: the Source was updated and saved.
+  SAVE_BLOCKED     Live run only: the CRM refused the Save (e.g. "Please fill
+                    in customer e-mail address." for customers with no
+                    e-mail). Nothing was saved; fix the record and re-run.
+  ERROR            Something unexpected went wrong on this record (the
+                    rest of the batch still runs; the run is marked failed).
 
 KNOWN GAPS (as of 2026-07-06)
 ------------------------------

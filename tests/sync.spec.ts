@@ -25,7 +25,7 @@ interface LogEntry {
   source: string;
   medium: string;
   contact: string;
-  status: string; // NOT_FOUND | AMBIGUOUS | SKIPPED_DIRECT | UNMAPPED | ALREADY_CORRECT | WOULD_CHANGE | CHANGED | ERROR
+  status: string; // NOT_FOUND | AMBIGUOUS | SKIPPED_DIRECT | UNMAPPED | ALREADY_CORRECT | WOULD_CHANGE | CHANGED | SAVE_BLOCKED | ERROR
   detail: string;
 }
 
@@ -213,7 +213,25 @@ async function reconcileSource(page: Page, lead: WhatConvertsLead): Promise<void
   // wait). Fix: wait for a real completion signal — the panel reverting from
   // Save/Cancel back to a plain "Edit" link only happens after the AJAX
   // response comes back and the panel re-renders in read-only mode.
-  await panel.getByRole('link', { name: 'Edit' }).waitFor({ state: 'visible', timeout: 15_000 });
+  //
+  // BUG FOUND IN CI 2026-10-14 (#4): the CRM now refuses to save a customer
+  // with no e-mail address. Save sends NO request — client-side validation
+  // shows a fading red "Required — Please fill in customer e-mail address."
+  // toast (#gritter-notice-wrapper .gritter-error) and the panel stays in edit
+  // mode, so waiting for "Edit" alone just times out and kills the whole run
+  // (every scheduled run since 2026-09-01). Wait for EITHER signal; if the
+  // toast wins, log the CRM's own message and cancel. Never invent an e-mail
+  // to get past it — that's client data a human has to supply.
+  const editLink = panel.getByRole('link', { name: 'Edit' });
+  const errorToast = page.locator('#gritter-notice-wrapper .gritter-error');
+  await editLink.or(errorToast).first().waitFor({ state: 'visible', timeout: 15_000 });
+  if (!(await editLink.isVisible().catch(() => false))) {
+    const toastText = ((await errorToast.first().innerText({ timeout: 2_000 }).catch(() => '')) || 'unknown validation error')
+      .replace(/Close Notification/i, '').replace(/\s+/g, ' ').trim();
+    log.push({ ...base, status: 'SAVE_BLOCKED', detail: `CRM rejected Save of "${currentValue}" -> "${mapping.crmSource}": "${toastText}" — fix the customer record (e.g. add an e-mail) and re-run` });
+    await panel.getByRole('link', { name: 'Cancel' }).click().catch(() => {});
+    return;
+  }
 
   // Verify the save actually persisted server-side — reload from the server
   // and re-read the READ-ONLY summary (not the edit-mode button, which only
@@ -238,20 +256,39 @@ test('Healthy Lawn NJ source sync', async ({ page }) => {
   const range = resolveDateRange();
   const leads = await fetchQuotableLeads(range);
 
+  // BUG FOUND IN CI 2026-07-29: the whole batch runs inside this ONE test, so
+  // the config's flat 2-minute ceiling was hit whenever the 7-day window had
+  // more than a handful of leads ("Test timeout of 120000ms exceeded", every
+  // run 07-29 -> 08-26). Scale the ceiling with the batch instead — each lead
+  // is up to 3 searches + an edit, so allow a generous minute apiece.
+  test.setTimeout(120_000 + leads.length * 60_000);
+
+  // One bad record must not abort the rest of the batch or swallow the log
+  // email (a crash here used to skip the email entirely, so nobody saw what a
+  // live run had or hadn't changed). Log it, move on, fail the run at the end.
+  let unexpectedErrors = 0;
   for (const lead of leads) {
-    const found = await findCustomer(page, lead);
-    if (!found) {
-      // findCustomer already logged AMBIGUOUS cases; only log plain not-found here.
-      const alreadyLogged = log.some((e) => e.leadId === lead.lead_id);
-      if (!alreadyLogged) {
-        log.push({
-          leadId: lead.lead_id, leadType: lead.lead_type, source: lead.lead_source, medium: lead.lead_medium,
-          contact: lead.contact_name, status: 'NOT_FOUND', detail: 'No CRM customer matched phone/email/name',
-        });
+    try {
+      const found = await findCustomer(page, lead);
+      if (!found) {
+        // findCustomer already logged AMBIGUOUS cases; only log plain not-found here.
+        const alreadyLogged = log.some((e) => e.leadId === lead.lead_id);
+        if (!alreadyLogged) {
+          log.push({
+            leadId: lead.lead_id, leadType: lead.lead_type, source: lead.lead_source, medium: lead.lead_medium,
+            contact: lead.contact_name, status: 'NOT_FOUND', detail: 'No CRM customer matched phone/email/name',
+          });
+        }
+        continue;
       }
-      continue;
+      await reconcileSource(page, lead);
+    } catch (err) {
+      unexpectedErrors++;
+      log.push({
+        leadId: lead.lead_id, leadType: lead.lead_type, source: lead.lead_source, medium: lead.lead_medium,
+        contact: lead.contact_name, status: 'ERROR', detail: `Unexpected failure (record may be left mid-edit, check it by hand): ${(err as Error).message.split('\n')[0]}`,
+      });
     }
-    await reconcileSource(page, lead);
   }
 
   const summary = [
@@ -270,5 +307,8 @@ test('Healthy Lawn NJ source sync', async ({ page }) => {
 
   await emailLog(LIVE_RUN ? 'LIVE RUN' : 'DRY RUN', summary);
 
-  expect(log.length).toBeGreaterThanOrEqual(0); // always passes; this test is a batch job, not a pass/fail check
+  // Per-record outcomes (NOT_FOUND, SAVE_BLOCKED, ...) are reported in the log,
+  // not as failures — but a thrown exception means the automation itself is
+  // broken, so still go red (after the email has gone out) so CI surfaces it.
+  expect(unexpectedErrors, 'leads that threw — see the log email for details').toBe(0);
 });
